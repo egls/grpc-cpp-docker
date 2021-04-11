@@ -15,7 +15,7 @@
 #
 # Based on https://hub.docker.com/r/grpc/cxx.
 
-FROM debian:stretch as build
+FROM debian:buster as build
 
 RUN apt-get update && apt-get install -y \
   autoconf \
@@ -29,43 +29,74 @@ RUN apt-get update && apt-get install -y \
   make \
   pkg-config \
   unzip \
+  zlib1g \
+  libz-dev \
+  libconfig++-dev \ 
+  libsqlite3-dev \ 
+  clang \
+  clang-tidy \
+  clang-format \
   && apt-get clean
 
-ENV GRPC_RELEASE_TAG v1.16.0
+ENV GRPC_RELEASE_TAG v1.35.0
 ENV CALCULATOR_BUILD_PATH /usr/local/calculator
 
-RUN git clone -b ${GRPC_RELEASE_TAG} https://github.com/grpc/grpc /var/local/git/grpc && \
-    cd /var/local/git/grpc && \
-    git submodule update --init --recursive
+RUN echo "-- prepare gprc install" && \
+    export MY_INSTALL_DIR=$HOME/.local && \ 
+    mkdir -p $MY_INSTALL_DIR && \
+    export PATH="$PATH:$MY_INSTALL_DIR/bin"
 
-RUN echo "-- installing protobuf" && \
-    cd /var/local/git/grpc/third_party/protobuf && \
-    ./autogen.sh && ./configure --enable-shared && \
-    make -j$(nproc) && make -j$(nproc) check && make install && make clean && ldconfig
+RUN echo "-- clone grpc repo" && \
+    git clone --recurse-submodules -b v1.35.0 https://github.com/grpc/grpc
 
-RUN echo "-- installing grpc" && \
-    cd /var/local/git/grpc && \
-    make -j$(nproc) && make install && make clean && ldconfig
 
-COPY . $CALCULATOR_BUILD_PATH/src/calculator/
+RUN echo "-- build an install grpc..." && \
+    cd grpc && \   
+    mkdir -p cmake/build && \
+    cd cmake/build && \
+    cmake -DgRPC_INSTALL=ON -DgRPC_BUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX=$MY_INSTALL_DIR ../.. && \
+    make -j2 && \                                    
+    make install                      
+                              
+RUN echo "-- build examples..." && \
+    cd /grpc/examples/cpp/helloworld && \
+    mkdir -p cmake/build && \
+    cd cmake/build && \
+    cmake -DCMAKE_PREFIX_PATH=$MY_INSTALL_DIR ../.. && \
+    make -j2
 
-RUN echo "-- building calculator" && \
-    mkdir -p $CALCULATOR_BUILD_PATH/out/calculator && \
-    cd $CALCULATOR_BUILD_PATH/out/calculator && \
-    cmake -DCMAKE_BUILD_TYPE=Release $CALCULATOR_BUILD_PATH/src/calculator && \
-    make && \
-    mkdir -p bin && \
-    ldd calculator | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp -v '{}' bin/ && \
-    mv calculator bin/calculator && \
-    echo "LD_LIBRARY_PATH=/opt/calculator/:\$LD_LIBRARY_PATH ./calculator" > bin/start.sh && \
-    chmod +x bin/start.sh
+#RUN git clone -b ${GRPC_RELEASE_TAG} https://github.com/grpc/grpc /var/local/git/grpc && \
+#   cd /var/local/git/grpc && \
+#    git submodule update --init --recursive
 
-WORKDIR $CALCULATOR_BUILD_PATH
-ENTRYPOINT ["/bin/bash"]
-CMD ["-s"]
+#RUN echo "-- installing protobuf" && \
+#    cd /var/local/git/grpc/third_party/protobuf && \
+#    ./autogen.sh && ./configure --enable-shared && \
+#    make -j$(nproc) && make -j$(nproc) check && make install && make clean && ldconfig
 
-FROM debian:stretch as runtime
-COPY --from=build /usr/local/calculator/out/calculator/bin/ /opt/calculator/
-EXPOSE 8080
-WORKDIR /opt/calculator/
-ENTRYPOINT ["/bin/bash", "start.sh"]
+#RUN echo "-- installing grpc" && \
+#    cd /var/local/git/grpc && \
+#    make -j$(nproc) && make install && make clean && ldconfig
+
+#COPY . $CALCULATOR_BUILD_PATH/src/calculator/
+
+#RUN echo "-- building calculator" && \
+#    mkdir -p $CALCULATOR_BUILD_PATH/out/calculator && \
+#    cd $CALCULATOR_BUILD_PATH/out/calculator && \
+#    cmake -DCMAKE_BUILD_TYPE=Release $CALCULATOR_BUILD_PATH/src/calculator && \
+#    make && \
+#    mkdir -p bin && \
+#    ldd calculator | grep "=> /" | awk '{print $3}' | xargs -I '{}' cp -v '{}' bin/ && \
+#    mv calculator bin/calculator && \
+#    echo "LD_LIBRARY_PATH=/opt/calculator/:\$LD_LIBRARY_PATH ./calculator" > bin/start.sh && \
+#    chmod +x bin/start.sh
+
+#WORKDIR $CALCULATOR_BUILD_PATH
+#ENTRYPOINT ["/bin/bash"]
+#CMD ["-s"]
+
+#FROM debian:buster as runtime
+#COPY --from=build /usr/local/calculator/out/calculator/bin/ /opt/calculator/
+#EXPOSE 8080
+#WORKDIR /opt/calculator/
+#ENTRYPOINT ["/bin/bash", "start.sh"]
